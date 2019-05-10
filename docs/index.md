@@ -4,3 +4,7 @@ title: 概览
 ---
 # 概览
 ## 基本技术
+
+行内数学公式：$\Gamma(n) = (n-1)!\quad\forall n\in\mathbb N$
+块级公式：
+$$ x = \dfrac{-b \pm \sqrt{b^2 - 4ac}}{2a} $$
