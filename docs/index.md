@@ -19,4 +19,4 @@ $$ x = \dfrac{-b \pm \sqrt{b^2 - 4ac}}{2a} $$
 
 #### 2.1.1 Planar Projected Shadows
 
-[基本效果](2-1_Projection_Shadows_basic.html)
+[基本效果](2_1_Projection_Shadows_basic.html)
