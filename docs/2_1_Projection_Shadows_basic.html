@@ -4,20 +4,45 @@
 		<script type="text/javascript" src="Oak3D_v_0_5.js" ></script>
 		<script id="shader-fs" type="x-shader/x-fragment">
 			precision mediump float;
+			
+			varying vec2 vTextureCoord;
+			varying vec3 vTransformedNormal;
+			varying vec4 vPosition;
 
-			void main(void){
-				gl_FragColor = vec4(0.5, 1.0, 0.5, 1.0);
+			uniform vec3 uPointLightingLocation;
+			uniform sampler2D uSampler;
+
+			void main(void) {
+				vec3 lightDirection = normalize(uPointLightingLocation - vPosition.xyz);
+				vec3 normal = normalize(vTransformedNormal);
+
+
+				float diffuseLightWeighting = max(dot(normal, lightDirection), 0.0) + 0.25;
+
+				vec4 fragmentColor = texture2D(uSampler, vTextureCoord);
+
+				gl_FragColor = vec4(fragmentColor.rgb * diffuseLightWeighting, fragmentColor.a);
 			}
 		</script>
 		<script id="shader-vs" type="x-shader/x-vertex">
+			varying vec2 vTextureCoord;
+            varying vec3 vTransformedNormal;
+			varying vec4 vPosition;
+			
 			attribute vec3 aVertexPosition;
+            attribute vec3 aVertexNormal;
+            attribute vec2 aTextureCoord;
 
-			uniform mat4 uMVMatrix;
-			uniform mat4 uPMatrix;
+            uniform mat4 uMVMatrix;
+            uniform mat4 uPMatrix;
+            uniform mat4 uNMatrix;
 
-			void main(void){
-				gl_Position = uPMatrix * uMVMatrix * vec4(aVertexPosition, 1.0);
-			}
+            void main(void) {
+                vPosition = uMVMatrix * vec4(aVertexPosition, 1.0);
+                gl_Position = uPMatrix * vPosition;
+                vTextureCoord = aTextureCoord;
+                vTransformedNormal = (uNMatrix * vec4(aVertexNormal, 1.0)).xyz;
+            }
 		</script>
 		<script type="text/javascript">
 			var gl;
@@ -106,89 +131,197 @@
 				
 				shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
 				gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+
+				shaderProgram.vertexNormalAttribute = gl.getAttribLocation(shaderProgram, "aVertexNormal");
+				gl.enableVertexAttribArray(shaderProgram.vertexNormalAttribute);
+
+				shaderProgram.textureCoordAttribute = gl.getAttribLocation(shaderProgram, "aTextureCoord");
+				gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
 				
 				shaderProgram.pMatrixUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
 				shaderProgram.mvMatrixUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
+				shaderProgram.nMatrixUniform = gl.getUniformLocation(shaderProgram, "uNMatrix");
+
+				shaderProgram.samplerUniform = gl.getUniformLocation(shaderProgram, "uSampler");
+				shaderProgram.pointLightingLocationUniform = gl.getUniformLocation(shaderProgram, "uPointLightingLocation");
 			}
 			
+			function handleLoadedTexture(texture)
+			{
+				gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+				gl.bindTexture(gl.TEXTURE_2D, texture);
+				gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, texture.image);
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+				gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_NEAREST);
+				gl.generateMipmap(gl.TEXTURE_2D);
+
+				gl.bindTexture(gl.TEXTURE_2D, null);
+			}
+
+			var galvanizedTexture;
+
+			function initTexture()
+			{
+				galvanizedTexture = gl.createTexture();
+				galvanizedTexture.image = new Image();
+
+				galvanizedTexture.image.onload = function(){
+					handleLoadedTexture(galvanizedTexture);
+				};
+				galvanizedTexture.image.src = "arroway.jpg";
+			}
+
 			var mvMatrix;
 			var pMatrix;
-			
+	
 			function setMatrixUniforms()
 			{
 				gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix.toArray());
 				gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix.toArray());
+	
+				var normalMatrix = mvMatrix.inverse().transpose();
+				gl.uniformMatrix4fv(shaderProgram.nMatrixUniform, false, normalMatrix.toArray());
 			}
 			
-			var triangleVertexPositionBuffer;
-			var squareVertexPositionBuffer;
-			
-			function initBuffers()
+			var models = {};
+
+			function createBuffer(bufferType, bufferData, itemSize)
 			{
-				triangleVertexPositionBuffer = gl.createBuffer();
+				var buffer = gl.createBuffer();
+				gl.bindBuffer(bufferType, buffer);
+				if (bufferType == gl.ELEMENT_ARRAY_BUFFER)
+				{
+					gl.bufferData(bufferType, new Uint16Array(bufferData), gl.STATIC_DRAW);
+				}
+				else
+				{
+					gl.bufferData(bufferType, new Float32Array(bufferData), gl.STATIC_DRAW);
+				}
 				
-				gl.bindBuffer(gl.ARRAY_BUFFER, triangleVertexPositionBuffer);
-				var vertices = [
-					0.0, 1.0, 0.0,
-					-1.0, -1.0, 0.0,
-					1.0, -1.0, 0.0
-				];
-				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
-				triangleVertexPositionBuffer.itemSize = 3;
-				triangleVertexPositionBuffer.numItems = 3;
-				
-				squareVertexPositionBuffer = gl.createBuffer();
-				gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer);
-				vertices = [
-					1.0, 1.0, 0.0,
-					-1.0, 1.0, 0.0,
-					1.0, -1.0, 0.0,
-					-1.0, -1.0, 0.0
-				];
-				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
-				squareVertexPositionBuffer.itemSize = 3;
-				squareVertexPositionBuffer.numItems = 4;
+				buffer.itemSize = itemSize;
+				buffer.numItems = bufferData.length / itemSize;
+
+				return buffer;
+			}
+
+			function handleLoadedTeapot(id, modelData)
+			{
+				var info = {};
+				info.normals = createBuffer(gl.ARRAY_BUFFER, modelData.normals, 3);
+				info.uvs = createBuffer(gl.ARRAY_BUFFER, modelData.uvs, 2);
+				info.vertices = createBuffer(gl.ARRAY_BUFFER, modelData.vertices, 3);
+				info.faces = createBuffer(gl.ELEMENT_ARRAY_BUFFER, modelData.faces, 1);
+
+				models[id] = info;
+			}
+
+
+			function loadModel(id, path)
+			{
+				var request = new XMLHttpRequest();
+				request.open("GET", path);
+				request.onreadystatechange = function()
+				{
+					if (request.readyState == 4)
+					{
+						handleLoadedTeapot(id, JSON.parse(request.responseText));
+					}
+				};
+				request.send();
 			}
 			
+			var teapotAngle = 180;
+
 			function drawScene()
 			{
 				gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
 				gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 				
+				if (models["teapot"] == null)
+				{
+					return;
+				}
+
 				pMatrix = okMat4Proj(45, gl.viewportWidth/gl.viewportHeight, 0.1, 100.0);
 				
-				mvMatrix = okMat4Trans(-1.5, 0.0, -7.0);
+				gl.uniform3f(shaderProgram.pointLightingLocationUniform, -10.0, 4.0, -20.0);
+
+				mvMatrix = okMat4Trans(0, 0, -40);
+				mvMatrix.rot(OAK.SPACE_LOCAL, 23.4, 1, 0, -1, true);
+				mvMatrix.rotY(OAK.SPACE_LOCAL, teapotAngle, true);
 				
-				gl.bindBuffer(gl.ARRAY_BUFFER, triangleVertexPositionBuffer);
+				gl.activeTexture(gl.TEXTURE0);
+				gl.bindTexture(gl.TEXTURE_2D, galvanizedTexture);
+
+				gl.uniform1i(shaderProgram.samplerUniform, 0);
+				
+
+				drawModel("teapot");
+				drawModel("plane");
+			}
+
+			function drawModel(id)
+			{
+				var info = models[id];
+				gl.bindBuffer(gl.ARRAY_BUFFER, info.vertices);
 				gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute,
-				 	triangleVertexPositionBuffer.itemSize,
-					gl.FLOAT, false, 0, 0);
-					setMatrixUniforms();
-					gl.drawArrays(gl.TRIANGLES, 0, triangleVertexPositionBuffer.numItems);
-				
-				mvMatrix = okMat4Trans(1.5, 0.0, -7.0);
-				gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer);
-				gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, squareVertexPositionBuffer.itemSize,
-					gl.FLOAT, false, 0, 0);
+						info.vertices.itemSize, gl.FLOAT, false, 0, 0);
+
+				gl.bindBuffer(gl.ARRAY_BUFFER, info.uvs);
+				gl.vertexAttribPointer(shaderProgram.textureCoordAttribute,
+						info.uvs.itemSize, gl.FLOAT, false, 0, 0);
+
+				gl.bindBuffer(gl.ARRAY_BUFFER, info.normals);
+				gl.vertexAttribPointer(shaderProgram.vertexNormalAttribute,
+						info.normals.itemSize, gl.FLOAT, false, 0, 0);
+
+				gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, info.faces);
 				setMatrixUniforms();
-				gl.drawArrays(gl.TRIANGLE_STRIP, 0, squareVertexPositionBuffer.numItems);
+				gl.drawElements(gl.TRIANGLES, info.faces.numItems, gl.UNSIGNED_SHORT, 0);
+				console.trace("drawing model");
 			}
 			
+			var lastTime = 0;
+
+			function animate()
+			{
+				var timeNow = new Date().getTime();
+				if ( lastTime != 0 )
+				{
+					var elapsed = timeNow - lastTime;
+
+					teapotAngle += 0.05 * elapsed;
+				}
+
+				lastTime = timeNow;
+			}
+
+			function tick()
+			{
+				okRequestAnimationFrame(tick);
+
+				drawScene();
+
+				animate();
+			}
+
 			function webGLStart()
 			{
 				var canvas = document.getElementById("webGLStudy-canvas");
 				initGL(canvas);
 				initShader();
-				initBuffers();
+				initTexture();
+				loadModel("teapot", "Teapot.json");
+				loadModel("plane", "Plane6.json");
 				
 				gl.clearColor(0.0, 0.0, 0.0, 1.0);
 				gl.enable(gl.DEPTH_TEST);
 				
-				drawScene();
+				tick();
 			}
 		</script>
 	</head>
 	<body onload="webGLStart();">
-		<canvas id="webGLStudy-canvas" width="500" height="500" />
+		<canvas id="webGLStudy-canvas" width="800" height="600" />
 	</body>
 </html>
