@@ -1,7 +1,7 @@
 <html>
 	<head>
 		<title>WebGlStudy001</title>
-		<script type="text/javascript" src="Oak3D_v_0_5.js" ></script>
+		<script type="text/javascript" src="gl-matrix-min_2.8.1.js" ></script>
 		<script id="shader-fs" type="x-shader/x-fragment">
 			precision mediump float;
 			
@@ -171,16 +171,18 @@
 				galvanizedTexture.image.src = "arroway.jpg";
 			}
 
-			var mvMatrix;
-			var pMatrix;
+			var mvMatrix = mat4.create();
+			var pMatrix = mat4.create();
 	
 			function setMatrixUniforms()
 			{
-				gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix.toArray());
-				gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix.toArray());
+				gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix);
+				gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix);
 	
-				var normalMatrix = mvMatrix.inverse().transpose();
-				gl.uniformMatrix4fv(shaderProgram.nMatrixUniform, false, normalMatrix.toArray());
+				var normalMatrix = mat4.create();
+				mat4.invert(normalMatrix, mvMatrix);
+				mat4.transpose(normalMatrix, normalMatrix);
+				gl.uniformMatrix4fv(shaderProgram.nMatrixUniform, false, normalMatrix);
 			}
 			
 			var models = {};
@@ -242,13 +244,15 @@
 					return;
 				}
 
-				pMatrix = okMat4Proj(45, gl.viewportWidth/gl.viewportHeight, 0.1, 100.0);
+				mat4.identity(pMatrix);
+				mat4.perspective(pMatrix, Math.PI * 0.25, gl.viewportWidth/gl.viewportHeight, 0.1, 100.0);
 				
 				gl.uniform3f(shaderProgram.pointLightingLocationUniform, -10.0, 4.0, -20.0);
 
-				mvMatrix = okMat4Trans(0, 0, -40);
-				mvMatrix.rot(OAK.SPACE_LOCAL, 23.4, 1, 0, -1, true);
-				mvMatrix.rotY(OAK.SPACE_LOCAL, teapotAngle, true);
+				mat4.identity(mvMatrix);
+				mat4.translate(mvMatrix, mvMatrix, [0, 0, -40]);
+				mat4.rotate(mvMatrix, mvMatrix, 23.4 / 180 * Math.PI, [1, 0, -1]);
+				mat4.rotateY(mvMatrix, mvMatrix, teapotAngle / 180 * Math.PI);
 				
 				gl.activeTexture(gl.TEXTURE0);
 				gl.bindTexture(gl.TEXTURE_2D, galvanizedTexture);
@@ -257,6 +261,10 @@
 				
 
 				drawModel("teapot");
+
+				mat4.identity(mvMatrix);
+				mat4.translate(mvMatrix, mvMatrix, [0, -8, -40]);
+				mat4.rotateX(mvMatrix, mvMatrix, -Math.PI * 0.45);
 				drawModel("plane");
 			}
 
@@ -278,7 +286,6 @@
 				gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, info.faces);
 				setMatrixUniforms();
 				gl.drawElements(gl.TRIANGLES, info.faces.numItems, gl.UNSIGNED_SHORT, 0);
-				console.trace("drawing model");
 			}
 			
 			var lastTime = 0;
@@ -298,7 +305,7 @@
 
 			function tick()
 			{
-				okRequestAnimationFrame(tick);
+				requestAnimationFrame(tick);
 
 				drawScene();
 
@@ -312,7 +319,7 @@
 				initShader();
 				initTexture();
 				loadModel("teapot", "Teapot.json");
-				loadModel("plane", "Plane6.json");
+				loadModel("plane", "Plane.json");
 				
 				gl.clearColor(0.0, 0.0, 0.0, 1.0);
 				gl.enable(gl.DEPTH_TEST);
