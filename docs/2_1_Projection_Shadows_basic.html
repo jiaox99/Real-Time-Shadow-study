@@ -1,8 +1,9 @@
+<!DOCTYPE html>
 <html>
 	<head>
-		<title>WebGlStudy001</title>
+		<title>2_1_Projection_Shadows_basic</title>
 		<script type="text/javascript" src="gl-matrix-min_2.8.1.js" ></script>
-		<script id="shader-fs" type="x-shader/x-fragment">
+		<script id="common-shader-fs" type="x-shader/x-fragment">
 			precision mediump float;
 			
 			varying vec2 vTextureCoord;
@@ -24,7 +25,7 @@
 				gl_FragColor = vec4(fragmentColor.rgb * diffuseLightWeighting, fragmentColor.a);
 			}
 		</script>
-		<script id="shader-vs" type="x-shader/x-vertex">
+		<script id="common-shader-vs" type="x-shader/x-vertex">
 			varying vec2 vTextureCoord;
             varying vec3 vTransformedNormal;
 			varying vec4 vPosition;
@@ -44,13 +45,33 @@
                 vTransformedNormal = (uNMatrix * vec4(aVertexNormal, 1.0)).xyz;
             }
 		</script>
+		<script id="shadow-shader-fs" type="x-shader/x-fragment">
+			precision mediump float;
+			
+			void main(void) {
+				gl_FragColor = vec4(0, 0, 0, 0.1);
+			}
+		</script>
+		<script id="shadow-shader-vs" type="x-shader/x-vertex">
+			attribute vec3 aVertexPosition;
+
+			uniform mat4 uPMatrix;
+			uniform mat4 uSMatrix;
+			uniform mat4 uMVMatrix;
+
+            void main(void) {
+				vec4 position = uMVMatrix * vec4(aVertexPosition, 1.0);
+				position = uSMatrix * position;
+                gl_Position = uPMatrix * position;
+            }
+		</script>
 		<script type="text/javascript">
 			var gl;
 			function initGL(canvas)
 			{
 				try
 				{
-					gl = canvas.getContext("experimental-webgl");
+					gl = canvas.getContext("experimental-webgl", {stencil:true});
 					gl.viewportWidth = canvas.width;
 					gl.viewportHeight = canvas.height;
 				}
@@ -72,17 +93,6 @@
 				{
 					return null;
 				}
-				
-				var str = "";
-				var k = shaderScript.firstChild;
-				while (k)
-				{
-					if ( k.nodeType == 3 )
-					{
-						str += k.textContent;
-					}
-					k = k.nextSibling;
-				}
 
 				var shader;
 				if ( shaderScript.type == "x-shader/x-fragment")
@@ -98,7 +108,7 @@
 					return null;
 				}
 				
-				gl.shaderSource(shader, str);
+				gl.shaderSource(shader, shaderScript.text);
 				gl.compileShader(shader);
 				
 				if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS))
@@ -110,33 +120,35 @@
 				return shader;
 			}
 			
-			var shaderProgram;
-			function initShader()
+			function buildShaderProgram( id )
 			{
-				var fragmentShader = getShader(gl, "shader-fs");
-				var vertexShader = getShader(gl, "shader-vs");
+				var fragmentShader = getShader(gl, id + "-fs");
+				var vertexShader = getShader(gl, id + "-vs");
 				
-				shaderProgram = gl.createProgram();
+				var program = gl.createProgram();
 				
-				gl.attachShader(shaderProgram, vertexShader);
-				gl.attachShader(shaderProgram, fragmentShader);
-				gl.linkProgram(shaderProgram);
+				gl.attachShader(program, vertexShader);
+				gl.attachShader(program, fragmentShader);
+				gl.linkProgram(program);
 				
-				if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS))
+				if (!gl.getProgramParameter(program, gl.LINK_STATUS))
 				{
 					alert("Could not initialise shader");
 				}
+
+				return program;
+			}
+
+			var shaderProgram;
+			function initCommonShader()
+			{
+				shaderProgram = buildShaderProgram( "common-shader" );
 				
 				gl.useProgram(shaderProgram);
 				
 				shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
-				gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
-
 				shaderProgram.vertexNormalAttribute = gl.getAttribLocation(shaderProgram, "aVertexNormal");
-				gl.enableVertexAttribArray(shaderProgram.vertexNormalAttribute);
-
 				shaderProgram.textureCoordAttribute = gl.getAttribLocation(shaderProgram, "aTextureCoord");
-				gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
 				
 				shaderProgram.pMatrixUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
 				shaderProgram.mvMatrixUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
@@ -144,6 +156,21 @@
 
 				shaderProgram.samplerUniform = gl.getUniformLocation(shaderProgram, "uSampler");
 				shaderProgram.pointLightingLocationUniform = gl.getUniformLocation(shaderProgram, "uPointLightingLocation");
+			}
+
+			var shadowShaderProgram;
+			function initShadowShader()
+			{
+				shadowShaderProgram = buildShaderProgram("shadow-shader");
+				
+				gl.useProgram(shadowShaderProgram);
+				
+				shadowShaderProgram.vertexPositionAttribute = gl.getAttribLocation(shadowShaderProgram, "aVertexPosition");
+				// gl.enableVertexAttribArray(shadowShaderProgram.vertexPositionAttribute);
+				
+				shadowShaderProgram.pMatrixUniform = gl.getUniformLocation(shadowShaderProgram, "uPMatrix");
+				shadowShaderProgram.mvMatrixUniform = gl.getUniformLocation(shadowShaderProgram, "uMVMatrix");
+				shadowShaderProgram.sMatrixUniform = gl.getUniformLocation(shadowShaderProgram, "uSMatrix");
 			}
 			
 			function handleLoadedTexture(texture)
@@ -156,6 +183,8 @@
 				gl.generateMipmap(gl.TEXTURE_2D);
 
 				gl.bindTexture(gl.TEXTURE_2D, null);
+
+				galvanizedTexture.ready = true;
 			}
 
 			var galvanizedTexture;
@@ -172,17 +201,47 @@
 			}
 
 			var mvMatrix = mat4.create();
+			var mvMatrix1 = mat4.create();
 			var pMatrix = mat4.create();
+			var sMatrix;
 	
-			function setMatrixUniforms()
+			function setMatrixUniforms(isShadow)
 			{
-				gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix);
-				gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix);
-	
 				var normalMatrix = mat4.create();
-				mat4.invert(normalMatrix, mvMatrix);
-				mat4.transpose(normalMatrix, normalMatrix);
-				gl.uniformMatrix4fv(shaderProgram.nMatrixUniform, false, normalMatrix);
+
+				if (isShadow)
+				{
+					mat4.invert(normalMatrix, mvMatrix1);
+					mat4.transpose(normalMatrix, normalMatrix);
+
+					gl.uniformMatrix4fv(shadowShaderProgram.pMatrixUniform, false, pMatrix);
+					gl.uniformMatrix4fv(shadowShaderProgram.mvMatrixUniform, false, mvMatrix);
+					var planInfo = models["plane"].oriData;
+					var normal1 = vec3.fromValues(planInfo.normals[0], planInfo.normals[1], planInfo.normals[2]);
+					var vertice1 = vec3.fromValues(planInfo.vertices[0], planInfo.vertices[1], planInfo.vertices[2]);
+
+					vec3.transformMat4(normal1, normal1, normalMatrix);
+					vec3.transformMat4(vertice1, vertice1, mvMatrix1);
+
+					var d = -vec3.dot(normal1, vertice1);
+
+					var dotNL = vec3.dot(normal1, lightLocation)
+					sMatrix = mat4.fromValues(dotNL + d -normal1[0] * lightLocation[0], -normal1[0] * lightLocation[1], -normal1[0] * lightLocation[2], -normal1[0],
+						-normal1[1] * lightLocation[0], dotNL + d - normal1[1] * lightLocation[1], -normal1[1] * lightLocation[2], -normal1[1],
+						-normal1[2] * lightLocation[0], -normal1[2] * lightLocation[1], dotNL + d - normal1[2] * lightLocation[2], -normal1[2],
+						-d * lightLocation[0], -d * lightLocation[1], -d * lightLocation[2], dotNL);
+
+					gl.uniformMatrix4fv(shadowShaderProgram.sMatrixUniform, false, sMatrix);
+				}
+				else
+				{
+					mat4.invert(normalMatrix, mvMatrix);
+					mat4.transpose(normalMatrix, normalMatrix);
+
+					gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix);
+					gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix);
+					gl.uniformMatrix4fv(shaderProgram.nMatrixUniform, false, normalMatrix);
+				}
 			}
 			
 			var models = {};
@@ -213,6 +272,7 @@
 				info.uvs = createBuffer(gl.ARRAY_BUFFER, modelData.uvs, 2);
 				info.vertices = createBuffer(gl.ARRAY_BUFFER, modelData.vertices, 3);
 				info.faces = createBuffer(gl.ELEMENT_ARRAY_BUFFER, modelData.faces, 1);
+				info.oriData = modelData;
 
 				models[id] = info;
 			}
@@ -233,61 +293,175 @@
 			}
 			
 			var teapotAngle = 180;
+			var lightLocation = vec3.fromValues(-10.0, 40, -20.0);
 
 			function drawScene()
 			{
 				gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
-				gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-				
-				if (models["teapot"] == null)
+				gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+				// gl.enable(gl.BLEND);
+				// gl.disable(gl.DEPTH_TEST);
+				// gl.blendFunc(gl.SRC_ALPHA, gl.DST_ALPHA );
+
+				if (models["teapot"] == null || !galvanizedTexture.ready)
 				{
 					return;
 				}
 
 				mat4.identity(pMatrix);
 				mat4.perspective(pMatrix, Math.PI * 0.25, gl.viewportWidth/gl.viewportHeight, 0.1, 100.0);
+
+				drawPlane();
+				drawShadow();
+				drawTeapot();
+			}
+
+			function drawPlane()
+			{
+				gl.useProgram(shaderProgram);
+				switchAttributes(shaderProgram, true);
+
+				gl.uniform3f(shaderProgram.pointLightingLocationUniform, lightLocation[0], lightLocation[1], lightLocation[2]);
+
+				mat4.identity(mvMatrix);
+				mat4.translate(mvMatrix, mvMatrix, [0, -8, -40]);
+				mat4.rotateX(mvMatrix, mvMatrix, -Math.PI * 0.45);
+				mat4.copy(mvMatrix1, mvMatrix);
+				gl.activeTexture(gl.TEXTURE0);
+				gl.bindTexture(gl.TEXTURE_2D, galvanizedTexture);
+
+				gl.uniform1i(shaderProgram.samplerUniform, 0);
+
+				gl.enable(gl.DEPTH_TEST);
+				gl.enable(gl.STENCIL_TEST);
+
+				gl.stencilFunc(gl.ALWAYS, 1, 0xFF);
+				gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE);
+				gl.stencilMask(0xFF);
+
+				drawModel("plane");
+				switchAttributes(shaderProgram, false);
+
+				gl.disable(gl.DEPTH_TEST);
+				gl.disable(gl.STENCIL_TEST);
+			}
+
+			function drawShadow()
+			{
+				gl.useProgram(shadowShaderProgram);
+				switchAttributes(shadowShaderProgram, true);
 				
-				gl.uniform3f(shaderProgram.pointLightingLocationUniform, -10.0, 4.0, -20.0);
+				mat4.identity(mvMatrix);
+				mat4.translate(mvMatrix, mvMatrix, [0, 0, -40]);
+				mat4.rotate(mvMatrix, mvMatrix, 23.4 / 180 * Math.PI, [1, 0, -1]);
+				mat4.rotateY(mvMatrix, mvMatrix, teapotAngle / 180 * Math.PI);
+
+				gl.disable(gl.DEPTH_TEST);
+				gl.disable(gl.CULL_FACE);
+
+				gl.enable(gl.STENCIL_TEST);
+
+				gl.enable(gl.BLEND);
+				gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
+
+				gl.stencilFunc(gl.EQUAL, 1, 0xFF);
+				gl.stencilOp(gl.KEEP, gl.KEEP, gl.INCR);
+				gl.stencilMask(0xFF);
+
+				drawModel("teapot", true);
+				switchAttributes(shadowShaderProgram, false);
+
+				gl.enable(gl.DEPTH_TEST);
+				gl.enable(gl.CULL_FACE);
+
+				gl.disable(gl.STENCIL_TEST);
+				gl.disable(gl.BLEND);
+			}
+
+			function drawTeapot()
+			{
+				gl.useProgram(shaderProgram);
+				switchAttributes(shaderProgram, true);
 
 				mat4.identity(mvMatrix);
 				mat4.translate(mvMatrix, mvMatrix, [0, 0, -40]);
 				mat4.rotate(mvMatrix, mvMatrix, 23.4 / 180 * Math.PI, [1, 0, -1]);
 				mat4.rotateY(mvMatrix, mvMatrix, teapotAngle / 180 * Math.PI);
+
+				gl.uniform3f(shaderProgram.pointLightingLocationUniform, lightLocation[0], lightLocation[1], lightLocation[2]);
 				
 				gl.activeTexture(gl.TEXTURE0);
 				gl.bindTexture(gl.TEXTURE_2D, galvanizedTexture);
 
 				gl.uniform1i(shaderProgram.samplerUniform, 0);
-				
 
+				gl.enable(gl.DEPTH_TEST);
 				drawModel("teapot");
-
-				mat4.identity(mvMatrix);
-				mat4.translate(mvMatrix, mvMatrix, [0, -8, -40]);
-				mat4.rotateX(mvMatrix, mvMatrix, -Math.PI * 0.45);
-				drawModel("plane");
+				switchAttributes(shaderProgram, false);
+				gl.enable(gl.DEPTH_TEST);
 			}
 
-			function drawModel(id)
+			function drawModel(id, isShadow=false)
 			{
 				var info = models[id];
-				gl.bindBuffer(gl.ARRAY_BUFFER, info.vertices);
-				gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute,
+
+				if (!isShadow)
+				{
+					gl.bindBuffer(gl.ARRAY_BUFFER, info.vertices);
+					gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute,
 						info.vertices.itemSize, gl.FLOAT, false, 0, 0);
 
-				gl.bindBuffer(gl.ARRAY_BUFFER, info.uvs);
-				gl.vertexAttribPointer(shaderProgram.textureCoordAttribute,
+					gl.bindBuffer(gl.ARRAY_BUFFER, info.uvs);
+					gl.vertexAttribPointer(shaderProgram.textureCoordAttribute,
 						info.uvs.itemSize, gl.FLOAT, false, 0, 0);
 
-				gl.bindBuffer(gl.ARRAY_BUFFER, info.normals);
-				gl.vertexAttribPointer(shaderProgram.vertexNormalAttribute,
+					gl.bindBuffer(gl.ARRAY_BUFFER, info.normals);
+					gl.vertexAttribPointer(shaderProgram.vertexNormalAttribute,
 						info.normals.itemSize, gl.FLOAT, false, 0, 0);
+				}
+				else
+				{
+					gl.bindBuffer(gl.ARRAY_BUFFER, info.vertices);
+					gl.vertexAttribPointer(shadowShaderProgram.vertexPositionAttribute,
+						info.vertices.itemSize, gl.FLOAT, false, 0, 0);
+				}
+
+				setMatrixUniforms(isShadow);
 
 				gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, info.faces);
-				setMatrixUniforms();
 				gl.drawElements(gl.TRIANGLES, info.faces.numItems, gl.UNSIGNED_SHORT, 0);
 			}
 			
+			function switchAttributes(program, isOn)
+			{
+				if (isOn)
+				{
+					if (program == shaderProgram)
+					{
+						gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+						gl.enableVertexAttribArray(shaderProgram.vertexNormalAttribute);
+						gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
+					}
+					else
+					{
+						gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+					}
+				}
+				else
+				{
+					if (program == shaderProgram)
+					{
+						gl.disableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+						gl.disableVertexAttribArray(shaderProgram.vertexNormalAttribute);
+						gl.disableVertexAttribArray(shaderProgram.textureCoordAttribute);
+					}
+					else
+					{
+						gl.disableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+					}
+				}
+			}
+
 			var lastTime = 0;
 
 			function animate()
@@ -316,13 +490,13 @@
 			{
 				var canvas = document.getElementById("webGLStudy-canvas");
 				initGL(canvas);
-				initShader();
+				initShadowShader();
+				initCommonShader();
 				initTexture();
 				loadModel("teapot", "Teapot.json");
 				loadModel("plane", "Plane.json");
 				
 				gl.clearColor(0.0, 0.0, 0.0, 1.0);
-				gl.enable(gl.DEPTH_TEST);
 				
 				tick();
 			}
